@@ -1,10 +1,13 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
-
+import (
+	"fmt"
+	"hash/fnv"
+	"log"
+	"net/rpc"
+	"os"
+	"time"
+)
 
 //
 // Map functions return a slice of KeyValue.
@@ -24,19 +27,79 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+// 请求任务
+// 执行map或reduce任务
+// 处理文件输入输出
+// 汇报任务状态
 
 //
 // main/mrworker.go calls this function.
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
-
 	// Your worker implementation here.
-
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
+	workerID := os.Getpid()
+
+	for {
+		// 请求任务
+		task :=getTask(workerID)
+
+		switch task.TaskType {
+		case MapTask:
+			// 执行map任务
+			doMap(task, mapf, workerID)
+		case ReduceTask:
+			// 执行reduce任务
+			doReduce(task, reducef, workerID)
+		case ExitTask:
+			// 退出worker
+			return
+		case WaitTask:
+			time.Sleep(500 * time.Millisecond)
+			// 等待所有任务完成
+			continue
+		}
+	}
 
 }
+
+func doMap(task GetTaskReply, mapf func(string, string) []KeyValue, workerID int) {
+	// 读取文件内容
+	filename := task.FileName
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("doMap: cannot open %v", filename)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatalf("doMap: cannot read %v", filename)
+	}
+	defer file.Close()
+
+	// 调用map函数处理文件内容
+	kva := mapf(filename, string(content))
+
+	// 对map输出进行分区
+	intermediate := make([][]KeyValue, task.NReduce)
+	for _, kv := range kva {
+		reduceTaskNum := ihash(kv.Key) % task.NReduce
+		intermediate[reduceTaskNum] = append(intermediate[reduceTaskNum], kv)
+	}
+
+
+func doReduce(task GetTaskReply, reducef func(string, []string) string, workerID int) {
+	
+}
+
+func getTask(workerID int) GetTaskReply{
+	args := GetTaskArgs{WorkerID: workerID}
+	reply := GetTaskReply{}
+	call("Coordinator.GetTask", &args, &reply)
+	return reply
+}
+
 
 //
 // example function to show how to make an RPC call to the coordinator.
