@@ -10,7 +10,7 @@ type PutAppendArgs struct {
 }
 
 type PutAppendReply struct {
-	Value string
+	Value string // 对于Append返回旧值
 }
 
 type GetArgs struct {
