@@ -3,6 +3,8 @@ package kvsrv
 import (
 	"crypto/rand"
 	"math/big"
+	"sync"
+	"time"
 
 	"6.5840/labrpc"
 )
@@ -10,6 +12,9 @@ import (
 type Clerk struct {
 	server *labrpc.ClientEnd
 	// You will have to modify this struct.
+	clientID  int64      // 客户端ID
+	requestID int64      // 客户端请求ID
+	mu        sync.Mutex // 客户端请求ID互斥锁
 }
 
 func nrand() int64 {
@@ -23,6 +28,8 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.server = server
 	// You'll have to add code here.
+	ck.clientID = nrand()
+	ck.requestID = 0
 	return ck
 }
 
@@ -38,12 +45,26 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
 	// You will have to modify this function.
+	// 生成一个请求ID
+	ck.mu.Lock()
+	requestID := ck.requestID
+	ck.requestID++
+	ck.mu.Unlock()
+
 	args := GetArgs{
-		Key: key,
+		Key:       key,
+		ClientID:  ck.clientID,
+		RequestID: requestID,
 	}
-	reply := GetReply{}
-	ck.server.Call("KVServer.Get", &args, &reply)
-	return reply.Value
+
+	for {
+		reply := GetReply{}
+		ok := ck.server.Call("KVServer.Get", &args, &reply)
+		if ok {
+			return reply.Value
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // shared by Put and Append.
@@ -56,13 +77,26 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	// You will have to modify this function.
+	ck.mu.Lock()
+	requestID := ck.requestID
+	ck.requestID++
+	ck.mu.Unlock()
+
 	args := PutAppendArgs{
-		Key:   key,
-		Value: value,
+		Key:       key,
+		Value:     value,
+		ClientID:  ck.clientID,
+		RequestID: requestID,
 	}
-	reply := PutAppendReply{}
-	ck.server.Call("KVServer."+op, &args, &reply)
-	return reply.Value
+
+	for {
+		reply := PutAppendReply{}
+		ok := ck.server.Call("KVServer."+op, &args, &reply)
+		if ok {
+			return reply.Value
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
